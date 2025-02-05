@@ -2,7 +2,6 @@ import type { ApiEndpoint, TransformField } from './types'
 import type { Type } from 'ts-morph'
 
 export function generateTransformCode(endpoints: ApiEndpoint[]): string {
-	// Generate transform code
 	return `
 import type { FetchResult } from '#app'
 import type { NitroFetchRequest, AvailableRouterMethod } from 'nitropack/types'
@@ -12,25 +11,21 @@ export type TransformRouteMethods<ReqT extends TransformRoutes> = AvailableRoute
 export type TransformFetchResult<ReqT extends TransformRoutes, Method extends TransformRouteMethods<ReqT>> = ReturnType<typeof transforms[ReqT][Method]>
 
 export const transforms = {
-${endpoints.map(({ path, filePath, method, responseType }) => {
+${Array.from(new Set(endpoints.map((e) => e.path))).map((path) => {
+	const pathEndpoints = endpoints.filter((e) => e.path === path)
+	return `	'${path}': {
+${pathEndpoints.map(({ method, filePath, responseType }) => {
 	const transforms: TransformField[] = []
 	analyzeType(responseType, [], transforms)
 
-	// console.log('transforms', path, method, transforms)
-
-	// If no transforms, return identity function
 	if (!transforms.length) {
-		return `	'${path}': {
-		'${method}': (data: FetchResult<'${path}', '${method}'>): FetchResult<'${path}', '${method}'> => data
-	}`
+		return `		'${method}': (data: FetchResult<'${path}', '${method}'>): FetchResult<'${path}', '${method}'> => data`
 	}
 
-	// Group transforms by container path
 	const transformsByContainer = transforms.reduce((acc, transform) => {
 		const containerKey = transform.isArray
 			? transform.containerPath.join('.')
 			: 'root'
-
 		if (!acc[containerKey]) {
 			acc[containerKey] = []
 		}
@@ -38,15 +33,13 @@ ${endpoints.map(({ path, filePath, method, responseType }) => {
 		return acc
 	}, {} as Record<string, TransformField[]>)
 
-	return `	'${path}': {
-		'${method}': (data: FetchResult<'${path}', '${method}'>): Awaited<ReturnType<typeof import('../server/${filePath}').default>> => {
+	return `		'${method}': (data: FetchResult<'${path}', '${method}'>): Awaited<ReturnType<typeof import('../server/${filePath}').default>> => {
 			if (!data) return data
 			const transformed = structuredClone(data) as unknown as NonNullable<Awaited<ReturnType<typeof import('../server/${filePath}').default>>>
 
 ${Object.entries(transformsByContainer).map(([containerKey, fields]) => {
 	if (!fields || !fields.length) return ''
 
-	// Handle root level transforms
 	if (containerKey === 'root') {
 		return fields.map((field) => {
 			const fullPath = field.path.map((p) => p === '[]' ? '' : `['${p}']`).join('')
@@ -56,7 +49,6 @@ ${Object.entries(transformsByContainer).map(([containerKey, fields]) => {
 		}).join('\n')
 	}
 
-	// Handle array transforms
 	const containerPath = fields[0]?.containerPath
 	if (!containerPath) return ''
 
@@ -77,9 +69,10 @@ ${fields.map((field) => {
 }).filter(Boolean).join('\n\n')}
 
 			return transformed
-		}
+		}`
+}).join(',\n')}
 	}`
-}).filter(Boolean).join(',\n')}
+}).join(',\n')}
 }
 
 export default transforms
@@ -87,10 +80,7 @@ export default transforms
 }
 
 function analyzeType(type: Type, currentPath: string[], transforms: TransformField[]): void {
-	// Check if type is a Date
 	if (type.getText() === 'Date') {
-		// console.log('type is date')
-		// Find the nearest array in the path
 		let containerPath: string[] = []
 		let isArray = false
 
@@ -112,9 +102,7 @@ function analyzeType(type: Type, currentPath: string[], transforms: TransformFie
 		return
 	}
 
-	// Handle array types
 	if (type.isArray()) {
-		// console.log('type is array')
 		const elementType = type.getArrayElementType()
 		if (elementType) {
 			analyzeType(elementType, [...currentPath, '[]'], transforms)
@@ -122,9 +110,7 @@ function analyzeType(type: Type, currentPath: string[], transforms: TransformFie
 		return
 	}
 
-	// Handle object types
 	if (type.isObject()) {
-		// console.log('type is object')
 		const properties = type.getProperties()
 		for (const prop of properties) {
 			const propDeclaration = prop.getDeclarations()[0]
